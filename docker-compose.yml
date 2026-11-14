@@ -1,0 +1,34 @@
+services:
+  ros:
+    build: .
+    image: go2-dev
+    network_mode: host
+    environment:
+      - DISPLAY=${DISPLAY}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ./ros_ws:/ws
+    stdin_open: true
+    tty: true
+    command: bash
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: go2-api
+    ports:
+      - "8000:8000"
+    environment:
+      - AUDITOR_DB=/data/auditor.db
+      - AUDITOR_MEDIA=/data/media
+      - AUDITOR_API_KEY=${AUDITOR_API_KEY:-}
+      - AUDITOR_CORS_ORIGINS=${AUDITOR_CORS_ORIGINS:-*}
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped

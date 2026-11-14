@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Go2 Site Auditor</title>
+<style>
+  :root { --bg:#f8fafc; --panel:#fff; --fg:#0f172a; --muted:#64748b; --line:#e2e8f0;
+          --blue:#2563eb; --red:#dc2626; --green:#16a34a; --amber:#d97706; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0b1220; --panel:#111827; --fg:#f1f5f9; --muted:#94a3b8; --line:#1f2937; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--fg); }
+  header { display:flex; gap:12px; flex-wrap:wrap; align-items:center; padding:14px 20px;
+           background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:2; }
+  header h1 { font-size:1.1rem; margin:0 12px 0 0; }
+  input, select, button { font:inherit; padding:8px 10px; border:1px solid var(--line);
+           border-radius:8px; background:var(--panel); color:var(--fg); }
+  button { cursor:pointer; }
+  button.primary { background:var(--blue); border-color:var(--blue); color:#fff; }
+  button.good { background:var(--green); border-color:var(--green); color:#fff; }
+  button.bad { background:var(--red); border-color:var(--red); color:#fff; }
+  main { display:grid; grid-template-columns:340px 1fr; gap:18px; padding:18px 20px; }
+  @media (max-width: 900px) { main { grid-template-columns:1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .list { display:flex; flex-direction:column; gap:10px; max-height:calc(100vh - 150px); overflow:auto; }
+  .card { border:1px solid var(--line); border-radius:10px; padding:10px; cursor:pointer; }
+  .card:hover, .card.active { border-color:var(--blue); }
+  .card .top { display:flex; justify-content:space-between; gap:8px; }
+  .card .meta { color:var(--muted); font-size:.82rem; margin-top:4px; }
+  .badge { display:inline-block; border-radius:999px; padding:1px 8px; font-size:.75rem; color:#fff; }
+  .status-open { background:var(--amber); } .status-confirmed { background:var(--green); }
+  .status-dismissed { background:var(--muted); }
+  .detail-head { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+  iframe { width:100%; height:78vh; border:1px solid var(--line); border-radius:10px; background:#fff; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  th, td { text-align:left; padding:7px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); }
+  .muted { color:var(--muted); }
+  .error { color:var(--red); padding:8px 0; white-space:pre-wrap; }
+  .tabs { display:flex; gap:8px; margin-left:auto; }
+  .tabs button.active { background:var(--blue); border-color:var(--blue); color:#fff; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Go2 Site Auditor</h1>
+  <input id="area" placeholder="area (blank = all)" size="16">
+  <select id="status">
+    <option value="">all statuses</option>
+    <option value="open">open</option>
+    <option value="confirmed">confirmed</option>
+    <option value="dismissed">dismissed</option>
+  </select>
+  <button id="refresh">Refresh</button>
+  <input id="key" placeholder="API key (if enabled)" size="20">
+  <div class="tabs">
+    <button id="tab-reports" class="active">Reports</button>
+    <button id="tab-state">Known state</button>
+  </div>
+</header>
+
+<main>
+  <section class="panel">
+    <div id="list-title" class="muted" style="margin-bottom:8px">Reports</div>
+    <div id="list" class="list"></div>
+  </section>
+
+  <section class="panel" id="reports-view">
+    <div id="detail-empty" class="muted">Select a report.</div>
+    <div id="detail" class="hidden">
+      <div class="detail-head">
+        <strong id="detail-title"></strong>
+        <span id="detail-status" class="badge"></span>
+        <button id="confirm" class="good">Confirm</button>
+        <button id="dismiss" class="bad">Dismiss</button>
+        <button id="reopen">Reopen</button>
+        <button id="promote" class="primary" title="Make the current patrol the expected inventory">Promote to known state</button>
+      </div>
+      <div id="detail-error" class="error"></div>
+      <iframe id="report-frame" title="Change report"></iframe>
+    </div>
+  </section>
+
+  <section class="panel hidden" id="state-view" style="grid-column:2">
+    <div class="detail-head"><strong>Known state</strong><span id="state-meta" class="muted"></span></div>
+    <div id="state-body"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let reports = [], selected = null, state = { area: "" };
+const token = () => localStorage.getItem("auditor_api_key") || "";
+
+$("key").value = token();
+$("key").addEventListener("change", () => {
+  localStorage.setItem("auditor_api_key", $("key").value.trim());
+  refresh();
+});
+
+function authHeaders() {
+  const t = token();
+  return t ? { "X-API-Key": t } : {};
+}
+function withToken(url) {
+  const t = token();
+  if (!t) return url;
+  return url + (url.includes("?") ? "&" : "?") + "api_key=" + encodeURIComponent(t);
+}
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { ...authHeaders(), ...(opts.headers || {}) } });
+  if (!r.ok) {
+    let detail = r.statusText;
+    try { detail = (await r.json()).detail || detail; } catch (_) {}
+    throw new Error(`${r.status}: ${detail}`);
+  }
+  return r.status === 204 ? null : r.json();
+}
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+
+async function refresh() {
+  const area = $("area").value.trim();
+  const status = $("status").value;
+  const q = new URLSearchParams();
+  if (area) q.set("area", area);
+  if (status) q.set("status", status);
+  try {
+    reports = await api("/reports?" + q.toString());
+    renderList();
+    if (selected) selectReport(selected.id);
+    else if (reports.length) selectReport(reports[0].id);
+  } catch (e) {
+    $("list").innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
+}
+
+function renderList() {
+  $("list-title").textContent = `Reports (${reports.length})`;
+  if (!reports.length) { $("list").innerHTML = '<div class="muted">No reports.</div>'; return; }
+  $("list").innerHTML = reports.map(r => {
+    const s = r.summary || {};
+    return `<div class="card ${selected && selected.id === r.id ? "active" : ""}" data-id="${r.id}">
+      <div class="top"><strong>#${r.id}</strong>
+        <span class="badge status-${esc(r.status || "open")}">${esc(r.status || "open")}</span></div>
+      <div class="meta">patrol ${r.baseline_id} &rarr; ${r.current_id} &middot; ${esc(r.area || "")} &middot; ${esc(new Date(r.created_at * 1000).toLocaleString())}</div>
+      <div class="meta">moved ${s.moved ?? 0} &middot; missing ${s.missing ?? 0} &middot; new ${s.new ?? 0}</div>
+    </div>`;
+  }).join("");
+  document.querySelectorAll(".card").forEach(el =>
+    el.addEventListener("click", () => selectReport(Number(el.dataset.id))));
+}
+
+function selectReport(id) {
+  selected = reports.find(r => r.id === id) || null;
+  renderList();
+  if (!selected) return;
+  $("detail-empty").classList.add("hidden");
+  $("detail").classList.remove("hidden");
+  $("detail-title").textContent = `Report #${selected.id}`;
+  const badge = $("detail-status");
+  badge.textContent = selected.status || "open";
+  badge.className = "badge status-" + (selected.status || "open");
+  $("report-frame").src = withToken(`/reports/${selected.id}/html`);
+  $("detail-error").textContent = "";
+}
+
+async function review(status) {
+  if (!selected) return;
+  try {
+    await api(`/reports/${selected.id}/review`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    await refresh();
+  } catch (e) { $("detail-error").textContent = e.message; }
+}
+
+$("confirm").onclick = () => review("confirmed");
+$("dismiss").onclick = () => review("dismissed");
+$("reopen").onclick = () => review("open");
+$("refresh").onclick = refresh;
+$("area").addEventListener("change", refresh);
+$("status").addEventListener("change", refresh);
+
+$("promote").onclick = async () => {
+  if (!selected) return;
+  try {
+    await api(`/patrols/${selected.current_id}/promote`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    alert(`Patrol ${selected.current_id} promoted to known state.`);
+  } catch (e) { $("detail-error").textContent = e.message; }
+};
+
+$("tab-reports").onclick = () => {
+  $("tab-reports").classList.add("active"); $("tab-state").classList.remove("active");
+  $("reports-view").classList.remove("hidden"); $("state-view").classList.add("hidden");
+};
+$("tab-state").onclick = async () => {
+  $("tab-state").classList.add("active"); $("tab-reports").classList.remove("active");
+  $("state-view").classList.remove("hidden"); $("reports-view").classList.add("hidden");
+  const area = $("area").value.trim() || (selected && selected.area ? selected.area : "");
+  if (!area) { $("state-body").innerHTML = '<div class="muted">Set an area filter to view its state.</div>'; return; }
+  try {
+    const st = await api(`/areas/${encodeURIComponent(area)}/state`);
+    $("state-meta").textContent = `from patrol ${st.patrol_id} · ${st.assets.length} expected objects`;
+    $("state-body").innerHTML = `<table><tr><th>id</th><th>class</th><th>x</th><th>y</th><th>seen</th></tr>
+      ${st.assets.map(a => `<tr><td>${esc(a.asset_uid)}</td><td>${esc(a.cls)}</td>
+        <td>${a.x.toFixed(1)}</td><td>${a.y.toFixed(1)}</td>
+        <td>${esc(new Date(a.updated_at * 1000).toLocaleString())}</td></tr>`).join("")}</table>`;
+  } catch (e) {
+    $("state-body").innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
+};
+
+refresh();
+</script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Runtime data
+*.db
+*.db-journal
+media/
+bags/*
+!bags/.gitkeep
+data/*
+!data/.gitkeep
+reports/*
+!reports/.gitkeep
+robot_discovery/
+
+# ROS build products
+ros_ws/build/
+ros_ws/install/
+ros_ws/log/
+
+# Editors
+.DS_Store
+.idea/
+.vscode/

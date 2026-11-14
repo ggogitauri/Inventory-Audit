@@ -1,0 +1,94 @@
+# Go2 Site Auditor
+
+A Unitree Go2 patrols a lab, records what it sees, and reports what **moved**,
+went **missing**, or is **new** compared with the lab's known state.
+
+The repository is deliberately split so the whole pipeline runs **without the
+robot**:
+
+```
+mock perception / JSONL replay / real detector
+        │  /auditor/detections (JSON)
+        ▼
+patrol_uploader  ──HTTP──▶  FastAPI backend  ──▶  SQLite + media
+        │                         │
+        │                         ├─ drift-corrected change detection
+        │                         ├─ known-state inventory + ignore zones
+        │                         └─ HTML/JSON reports + review UI
+        └─ queue + retry, at-least-once
+```
+
+## Quick start (no robot)
+
+```bash
+cd backend
+pip install -r requirements.txt
+pytest -s                                  # 48+ tests
+uvicorn auditor.api:app --port 8000        # http://localhost:8000/
+python demo_seed.py                        # simulated patrols + report URL
+```
+
+The review UI is at `http://localhost:8000/`; API docs at `/docs`.
+
+Or run the API in Docker (SQLite and media under `./data`):
+
+```bash
+docker compose up --build api
+```
+
+Evaluate the detector offline:
+
+```bash
+python evaluate.py --trials 200
+python evaluate.py --trials 100 --drift-sweep 0,0.1,0.2,0.3 --correct-drift
+python evaluate.py --trials 100 --appearance-weight 0.6 --confusion --clutter 0.1
+```
+
+Record a synthetic patrol for ROS replay:
+
+```bash
+python make_replay.py --out ../bags/monday.jsonl --scenario baseline --name monday
+```
+
+## ROS path
+
+```bash
+docker compose run --rm ros bash
+cd /ws && colcon build --symlink-install && source install/setup.bash
+ros2 launch go2_auditor mock_patrol.launch.py scenario:=baseline name:=monday
+ros2 launch go2_auditor mock_patrol.launch.py scenario:=changed  name:=tuesday
+
+# or replay a recording through the same uploader
+ros2 launch go2_auditor replay.launch.py messages:=/ws/bags/tuesday.jsonl
+```
+
+## Layout
+
+| Path | Purpose |
+|---|---|
+| `backend/auditor/` | change detection, drift alignment, storage, API, reports, eval |
+| `backend/evaluate.py` | offline metrics / drift sweep / calibration |
+| `backend/make_replay.py` | simulator → JSONL recording for ROS replay |
+| `ros_ws/src/go2_auditor/` | mock_perception, patrol_uploader, replay_node, launch files |
+| `app/` | dependency-free review UI served by the API |
+| `docs/ROBOT_DAY.md` | integration contract and first-physical-session checklist |
+
+## Before the robot arrives
+
+The work that matters most is already executable offline:
+
+1. **Versioned contract + idempotency** — patrol/pass uids, timestamps, pose,
+   sigma, map version, stored comparison config. Retries cannot duplicate data.
+2. **Replay harness** — the real ROS graph is exercised by replayed recordings,
+   not only in-process mocks.
+3. **Drift correction** — a RANSAC SE(2) estimate before matching. Simulated
+   precision stays ~0.91 at ±0.3 m per-patrol drift (it falls to ~0.28 without).
+4. **Appearance matching + image evidence** — embeddings disambiguate close
+   same-class objects; crop uploads are shown in the report.
+5. **Known-state inventory** — promote a reviewed patrol; compare against
+   expected assets rather than "whatever the last patrol happened to see".
+   Ignore zones and report review states are supported.
+6. **Ops** — optional API key, locked-down CORS config, Docker image, metrics,
+   and a small review UI.
+
+See `docs/ROBOT_DAY.md` for the first physical session.

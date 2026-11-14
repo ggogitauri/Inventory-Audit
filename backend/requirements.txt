@@ -1,0 +1,7 @@
+numpy
+jinja2
+scipy
+fastapi
+uvicorn
+httpx
+pytest
