@@ -137,9 +137,23 @@ def render_run_sheet(facts: dict) -> str:
     bad = [c for c in checks if c.status == "fail"]
     topics = facts.get("topics") or {}
     scan = topics.get("scan", "/scan")
+    lidar = topics.get("lidar_source") or scan
     odom = topics.get("odom", "/odom")
+    camera = topics.get("camera") or []
+    if isinstance(camera, str):
+        camera = [] if camera in ("", "-") else [camera]
+    lidar_topics: list[str] = []
+    for name in [lidar] + list(topics.get("lidar") or []):
+        if name and name not in lidar_topics:
+            lidar_topics.append(name)
+    lidar_label = ", ".join(f"`{t}`" for t in lidar_topics)
     api = facts.get("api_url", "http://localhost:8000")
     route = "/ws/src/go2_auditor/config/patrol_route.yaml"
+
+    bag_topics = " ".join(lidar_topics + [odom, "/tf", "/tf_static"])
+    if camera:
+        bag_topics += " " + " ".join(camera)
+    bag_cmd = f"ros2 bag record -o /ws/bags/lab_$(date +%H%M%S) {bag_topics}"
 
     lines = [f"# Lab run sheet — {facts.get('generated_at', '')}", ""]
     if bad:
@@ -147,41 +161,68 @@ def render_run_sheet(facts: dict) -> str:
                   "Fix these first; do not start motion.", ""]
     lines += [
         f"- ROS_DOMAIN_ID `{facts.get('domain', '0')}` · RMW `{facts.get('rmw', 'default')}`",
-        f"- Scan `{scan}` · Odom `{odom}` · API `{api}`",
+        f"- LiDAR {lidar_label} · Odom `{odom}` · API `{api}`",
+    ]
+    if camera:
+        lines.append("- Camera " + ", ".join(f"`{c}`" for c in camera))
+        lines.append("- Camera frames are the day-one deliverable; keep the bags")
+    else:
+        lines.append("- Camera: none detected on ROS — capture images from the "
+                     "Unitree app/WebRTC and note the source")
+    lines += [
         "",
         "## 0. Before any motion (10 min)",
         "- [ ] E-stop in hand, area clear, motion limits agreed",
         "- [ ] `ros2 topic list` shows the expected robot topics",
         f"- [ ] `ros2 run tf2_ros tf2_echo {facts.get('map_frame', 'map')} "
         f"{facts.get('base_frame', 'base_link')}` resolves",
+        "- [ ] If there is no map frame: run SLAM, or use `--map-frame odom` and "
+        "keep baseline + changed in one session",
         "- [ ] Robot and laptop clocks agree within 1 s (`date -u`)",
         f"- [ ] `curl -s {api}/health` returns ok from this laptop",
         "",
         "## 1. Static, sensors only (15 min)",
-        "- [ ] No motion. If the detector is ready, confirm one detection reaches the UI",
-        "- [ ] Put a box at a taped distance; reported x,y within ~0.3 m",
+        "- [ ] No motion. Record 60 s of sensors for replay (use the step 2 command)",
+        "- [ ] With a tape measure in view, capture images at 1, 2 and 3 m from a "
+        "known object",
+        "- [ ] Note which camera topic is colour and whether `camera_info` exists",
+        "- [ ] If the detector is already running: put a box at a taped distance and "
+        "check reported x,y (~0.3 m)",
         "",
         "## 2. Teleop loop + recording (30 min)",
-        "- [ ] Start recording first:",
-        f"      `ros2 bag record -o /ws/bags/lab_$(date +%H%M) {scan} {odom} /tf /tf_static`",
-        "- [ ] Drive one slow loop by hand; stop recording",
-        "- [ ] Confirm the coordinator logged exactly one pass for that loop",
-        "",
-        "## 3. Baseline patrol (2–3 loops)",
-        "- [ ] Start the coordinator (it never commands motion):",
+        "- [ ] At the loop start, start the coordinator in another terminal "
+        "(it never commands motion):",
         f"      `ros2 launch go2_auditor patrol.launch.py route_file:={route}`",
-        "- [ ] Every loop produced exactly one pass",
-        "- [ ] Promote it once detections are uploaded (note the patrol id first):",
+        "- [ ] Start recording first:",
+        f"      `{bag_cmd}`",
+        "- [ ] If the bag grows too fast, drop duplicate LiDAR/camera topics and rerun",
+        "- [ ] Drive one slow loop by hand; stop recording",
+        "- [ ] Confirm the coordinator logged exactly one loop event "
+        "(a pass needs a detector)",
+        "- [ ] Repeat until the coordinator has counted `n_passes` loops "
+        "(default 2); the bags are the day-one deliverable",
+        "",
+        "## 3. Baseline patrol (only with a detector)",
+        "- [ ] Restart the whole launch at the loop start so counting and the "
+        "patrol uid reset:",
+        f"      `ros2 launch go2_auditor patrol.launch.py route_file:={route}`",
+        "- [ ] Each completed loop produced exactly one pass, up to `n_passes`",
+        f"- [ ] Find the patrol id: `curl -s \"{api}/patrols?area=<area>\"`",
+        "- [ ] Promote it to the known state:",
         f"      `curl -s -X POST {api}/patrols/<patrol-id>/promote "
         f"-H 'content-type: application/json' -d '{{}}'`",
+        "- [ ] No detector today? Skip this step, do not promote an empty baseline",
         "",
-        "## 4. Plant changes, then a changed patrol",
-        "- [ ] Move 2 chairs, remove 1 box, add 1 object (write it down)",
-        "- [ ] Same route, same speed, 2–3 loops",
-        "- [ ] Report lists the planted changes",
+        "## 4. Plant changes, then a changed patrol (needs a detector)",
+        "- [ ] Move 2 chairs, remove 1 box, add 1 object (write it down, "
+        "photograph the setup)",
+        "- [ ] Same route, same speed, 2–3 loops, same `n_passes`",
+        f"- [ ] Report lists the planted changes (UI at `{api}/`)",
+        "- [ ] Without a detector, still record the changed run and photos for "
+        "later annotation",
         "",
         "## 5. Record results before packing up",
-        "- [ ] Measured drift between baseline and changed: ______ m",
+        "- [ ] If a detector ran: measured drift baseline→changed: ______ m",
         "- [ ] Detector mistakes (missed / wrong class): ______",
         "- [ ] Copy `data/`, `bags/`, `ros_ws/robot_discovery/` off the laptop",
         "- [ ] Note anything odd: ______________________________________",

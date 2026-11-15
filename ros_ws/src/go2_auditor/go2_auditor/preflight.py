@@ -149,7 +149,9 @@ class Preflight(Node):
                                                 ("lidar", "points", "cloud", "scan")))
         self.facts["lidar/scan topics"] = ", ".join(lidar) or "-"
         self.facts["camera topics"] = ", ".join(camera) or "-"
-        self.report["topics"] = {"scan": self.opts.scan_topic, "odom": self.opts.odom_topic}
+        self.report["topics"] = {"scan": self.opts.scan_topic,
+                                 "odom": self.opts.odom_topic,
+                                 "camera": camera, "lidar": lidar}
         self._check("TF topics", "ok" if "/tf" in topics else "fail",
                     ", ".join(t for t in ("/tf", "/tf_static") if t in topics) or "none",
                     "No /tf: the robot's TF publisher is not running.")
@@ -158,12 +160,25 @@ class Preflight(Node):
         topic = self.opts.scan_topic
         topics = self._topic_types()
         if topic not in topics:
+            # Common on the Go2: the 4D LiDAR publishes PointCloud2, not LaserScan.
+            clouds = sorted(t for t in (self.report["topics"].get("lidar") or [])
+                            if topics.get(t) == "sensor_msgs/msg/PointCloud2")
+            if clouds:
+                self.report["topics"]["lidar_source"] = clouds[0]
+                self.facts["scan topic"] = f"{clouds[0]} (PointCloud2, no {topic})"
+                self._check("Laser scan topic", "warn",
+                            f"{topic} not found; LiDAR publishes {clouds[0]}",
+                            "Run pointcloud_to_laserscan for SLAM, or record the "
+                            "cloud for offline use. Day-one loop counting only "
+                            "needs odometry.")
+                return
             self._check("Laser scan topic", "fail", f"{topic} not found",
                         "If the LiDAR publishes PointCloud2, run "
                         "pointcloud_to_laserscan to create /scan, or pass "
                         "--scan-topic with the real scan topic.")
             return
         self.facts["scan topic"] = f"{topic} ({topics[topic]})"
+        self.report["topics"]["lidar_source"] = topic
         rate, msgs = self._sample(topic, LaserScan, self.opts.sample_seconds)
         if not msgs:
             self._check("Laser scan", "fail", f"no messages on {topic} in "
@@ -233,7 +248,9 @@ class Preflight(Node):
                 self._check("Map frame", "warn", f"{map_frame} -> {base} unavailable; "
                             f"odom -> {base} works",
                             "Start SLAM, or publish an identity map->odom so detections "
-                            "share a stable frame across patrols.")
+                            "share a stable frame across patrols. Short session? Run "
+                            "with --map-frame odom and keep baseline + changed together, "
+                            "accepting odometry drift.")
             else:
                 self._check("TF chain", "fail", f"no {map_frame} or odom -> {base}",
                             f"Check the robot's base frame name with --base-frame; "

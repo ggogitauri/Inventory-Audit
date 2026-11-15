@@ -98,8 +98,10 @@ ros2 launch go2_auditor patrol.launch.py \
     route_file:=/ws/src/go2_auditor/config/patrol_route.yaml
 ```
 
-Edit `config/patrol_route.yaml` to your map frame first. Full checklist and
-failures to watch for: `docs/ROBOT_DAY.md`.
+Edit `config/patrol_route.yaml` to your map frame first. Day one collects
+bags and camera frames; the real detector comes after those images exist, so
+there is nothing to promote yet. Full checklist, network notes and failures to
+watch for: `docs/ROBOT_DAY.md`.
 
 ## Layout
 

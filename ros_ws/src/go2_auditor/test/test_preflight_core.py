@@ -60,7 +60,8 @@ class RenderTest(unittest.TestCase):
             "map_frame": "map",
             "base_frame": "base_link",
             "checks": checks,
-            "topics": {"scan": "/scan", "odom": "/odom"},
+            "topics": {"scan": "/scan", "odom": "/odom",
+                       "camera": ["/camera/image_raw", "/camera/camera_info"]},
             "facts": {"scan topic": "/scan", "odom topic": "/odom"},
             "scan": {"frame_id": "laser", "beams": 360, "finite": 360,
                      "in_range": 340, "min": 0.3, "max": 7.8},
@@ -88,6 +89,34 @@ class RenderTest(unittest.TestCase):
         self.assertIn("http://localhost:8000", text)
         self.assertIn("/patrols/<patrol-id>/promote", text)
         self.assertNotIn("PREFLIGHT FAILED", text)
+
+    def test_run_sheet_records_camera_topics(self):
+        text = render_run_sheet(self.facts([Check("TF chain", "ok")]))
+        self.assertIn("`/camera/image_raw`", text)
+        self.assertIn("/camera/camera_info", text)
+        self.assertIn("ros2 bag record", text)
+        self.assertIn("%H%M%S", text)
+
+    def test_run_sheet_records_cloud_only_lidar(self):
+        facts = self.facts([Check("TF chain", "ok")])
+        facts["topics"]["lidar_source"] = "/utlidar/cloud"
+        text = render_run_sheet(facts)
+        self.assertIn("`/utlidar/cloud`", text)
+        self.assertIn("ros2 bag record", text)
+        self.assertIn("/utlidar/cloud /odom", text)
+
+    def test_run_sheet_records_scan_and_cloud_together(self):
+        facts = self.facts([Check("TF chain", "ok")])
+        facts["topics"]["lidar"] = ["/utlidar/cloud", "/scan"]
+        text = render_run_sheet(facts)
+        self.assertIn("/scan /utlidar/cloud /odom", text)
+
+    def test_run_sheet_without_camera_says_so(self):
+        facts = self.facts([Check("TF chain", "ok")])
+        facts["topics"]["camera"] = []
+        text = render_run_sheet(facts)
+        self.assertIn("Camera: none detected on ROS", text)
+        self.assertNotIn("camera/image_raw", text)
 
     def test_run_sheet_warns_on_failed_preflight(self):
         text = render_run_sheet(self.facts([Check("TF chain", "fail", "no tf")]))
