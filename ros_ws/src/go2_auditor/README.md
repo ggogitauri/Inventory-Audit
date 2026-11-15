@@ -43,9 +43,15 @@ uvicorn auditor.api:app --port 8000
 cd ~/go2_site_auditor && docker compose run --rm ros bash
 cd /ws && colcon build --symlink-install && source install/setup.bash
 
-# simulated patrols
+# simulated patrols (fake detections)
 ros2 launch go2_auditor mock_patrol.launch.py scenario:=baseline name:=monday
 ros2 launch go2_auditor mock_patrol.launch.py scenario:=changed  name:=tuesday
+
+# 2D sensor simulation: /scan, /odom, TF, then schema-v2 passes
+# (no Gazebo; works on a 4-core / 8 GB VM)
+ros2 launch go2_auditor sim_patrol.launch.py scenario:=baseline name:=monday
+ros2 launch go2_auditor sim_patrol.launch.py scenario:=changed  name:=tuesday
+# add use_slam:=true to run slam_toolbox on the simulated /scan
 
 # or replay a JSONL recording through the real ROS graph
 ros2 launch go2_auditor replay.launch.py messages:=/ws/bags/tuesday.jsonl

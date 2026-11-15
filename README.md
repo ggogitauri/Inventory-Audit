@@ -62,6 +62,25 @@ ros2 launch go2_auditor mock_patrol.launch.py scenario:=changed  name:=tuesday
 ros2 launch go2_auditor replay.launch.py messages:=/ws/bags/tuesday.jsonl
 ```
 
+## Simulated patrol (no Gazebo, no GPU)
+
+The 2D simulator publishes `/scan`, `/odom`, TF, and schema-v2 passes, so the
+real uploader/backend/SLAM path runs on a stock 4-core / 8 GB Ubuntu VM:
+
+```bash
+docker compose up --build -d api
+docker compose run --rm ros bash -lc 'cd /ws && colcon build --symlink-install'
+docker compose run --rm ros bash
+cd /ws && source install/setup.bash
+
+ros2 launch go2_auditor sim_patrol.launch.py scenario:=baseline name:=monday
+# Ctrl-C after "patrol complete"
+ros2 launch go2_auditor sim_patrol.launch.py scenario:=changed  name:=tuesday
+```
+
+Add `use_slam:=true` to exercise the real `slam_toolbox`. See
+`docs/SIM.md` for resource notes and limitations.
+
 ## Layout
 
 | Path | Purpose |
@@ -69,9 +88,10 @@ ros2 launch go2_auditor replay.launch.py messages:=/ws/bags/tuesday.jsonl
 | `backend/auditor/` | change detection, drift alignment, storage, API, reports, eval |
 | `backend/evaluate.py` | offline metrics / drift sweep / calibration |
 | `backend/make_replay.py` | simulator → JSONL recording for ROS replay |
-| `ros_ws/src/go2_auditor/` | mock_perception, patrol_uploader, replay_node, launch files |
+| `ros_ws/src/go2_auditor/` | mock_perception, sim_robot, patrol_uploader, replay_node, launch files |
 | `app/` | dependency-free review UI served by the API |
 | `docs/ROBOT_DAY.md` | integration contract and first-physical-session checklist |
+| `docs/SIM.md` | no-Gazebo simulated patrol for a stock Ubuntu VM |
 
 ## Before the robot arrives
 

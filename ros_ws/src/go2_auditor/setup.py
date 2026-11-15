@@ -13,6 +13,7 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
         (os.path.join("share", package_name, "launch"), glob("launch/*.py")),
+        (os.path.join("share", package_name, "config"), glob("config/*.yaml")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -25,6 +26,8 @@ setup(
             "mock_perception = go2_auditor.mock_perception:main",
             "patrol_uploader = go2_auditor.patrol_uploader:main",
             "replay_node = go2_auditor.replay_node:main",
+            "sim_robot = go2_auditor.sim_robot:main",
+            "ground_truth_detector = go2_auditor.ground_truth_detector:main",
         ],
     },
 )

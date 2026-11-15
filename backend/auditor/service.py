@@ -87,6 +87,21 @@ def promote_patrol(store: Store, patrol_id: int, min_votes: int | None = None) -
     return store.get_area_state(p["area"])
 
 
+def _require_same_map(baseline: dict, current: dict) -> None:
+    """Refuse to compare coordinates from two different maps.
+
+    A re-map moves the origin, so every position differs and the diff is noise.
+    Patrols recorded by older clients may have no map_version; only a real
+    mismatch (both sides labelled, and different) is an error.
+    """
+    before, after = baseline.get("map_version"), current.get("map_version")
+    if before and after and before != after:
+        raise ValueError(
+            f"map version changed ({before} -> {after}); re-map, then promote a "
+            f"patrol from the new map before comparing"
+        )
+
+
 def run_comparison(store: Store, current_id: int, baseline_id: int | None = None,
                    config: ChangeConfig | None = None,
                    baseline_mode: str | None = None) -> dict:
@@ -99,6 +114,7 @@ def run_comparison(store: Store, current_id: int, baseline_id: int | None = None
         if state is None or not state["assets"]:
             raise ValueError(f"area {area} has no known state; promote a patrol first")
         baseline_id = state["patrol_id"]
+        _require_same_map(store.get_patrol(baseline_id), current)
         base = [_asset_detection(a) for a in state["assets"]]
     else:
         if baseline_id is None:
@@ -110,6 +126,7 @@ def run_comparison(store: Store, current_id: int, baseline_id: int | None = None
             baseline_mode = baseline_mode or "explicit"
         if baseline_id == current_id:
             raise ValueError("baseline and current must be different patrols")
+        _require_same_map(store.get_patrol(baseline_id), current)
         base = consolidated(store, baseline_id)
 
     curr = consolidated(store, current_id)

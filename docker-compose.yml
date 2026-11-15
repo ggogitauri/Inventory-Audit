@@ -8,6 +8,7 @@ services:
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ./ros_ws:/ws
+      - ./bags:/ws/bags
     stdin_open: true
     tty: true
     command: bash

@@ -304,10 +304,23 @@ class Store:
         ).fetchone()
         idx = int(row[0])
         # Recorded even when empty: "saw nothing" is real evidence for the voting step.
-        self.db.execute(
-            "INSERT INTO passes(patrol_id, pass_idx, uid, captured_at, pose, meta) VALUES (?,?,?,?,?,?)",
-            (patrol_id, idx, uid, captured_at, _json(pose), _json(meta)),
-        )
+        try:
+            self.db.execute(
+                "INSERT INTO passes(patrol_id, pass_idx, uid, captured_at, pose, meta) "
+                "VALUES (?,?,?,?,?,?)",
+                (patrol_id, idx, uid, captured_at, _json(pose), _json(meta)),
+            )
+        except sqlite3.IntegrityError:
+            # Lost a race with another uploader sending the same pass uid (at-least-once
+            # delivery, or two uploaders on one DDS domain). The row is already stored, so
+            # return its index instead of failing with a 500.
+            self.db.rollback()
+            row = self.db.execute(
+                "SELECT patrol_id, pass_idx FROM passes WHERE uid=?", (uid,)
+            ).fetchone() if uid else None
+            if row is None or int(row["patrol_id"]) != patrol_id:
+                raise
+            return int(row["pass_idx"])
         self.db.executemany(
             "INSERT INTO detections(patrol_id, pass_idx, cls, x, y, conf, image, pose_sigma, embedding) "
             "VALUES (?,?,?,?,?,?,?,?,?)",

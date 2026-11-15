@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y \
     ros-humble-robot-localization ros-humble-rosbridge-suite \
     ros-humble-rmw-cyclonedds-cpp ros-humble-foxglove-bridge \
     ros-humble-pcl-ros ros-humble-grid-map \
+    ros-humble-slam-toolbox ros-humble-pointcloud-to-laserscan ros-humble-tf2-tools \
     python3-pip python3-colcon-common-extensions git \
     && rm -rf /var/lib/apt/lists/*
 
