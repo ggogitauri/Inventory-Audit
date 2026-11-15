@@ -103,6 +103,22 @@ ros2 run tf2_tools view_frames
 Expected rates: `/scan` about 10 Hz, `/odom` about 20 Hz. The `laser` frame is
 0.2 m forward and 0.3 m above `base_link`.
 
+## Rehearse the lab preflight
+
+The real-robot preflight works against the simulator too, so the day-one flow is
+rehearsed before you reach the lab. Start `sim_patrol.launch.py` in one shell,
+then in another:
+
+```bash
+docker compose run --rm ros bash -lc \
+  'cd /ws && source install/setup.bash && \
+   ros2 run go2_auditor preflight --check-upload'
+```
+
+It writes `robot_discovery/preflight-<stamp>/{preflight.md,run_sheet.md}` on the
+host. Expect one `WARN` for `/clock`: the simulator publishes it, the real robot
+should not.
+
 ## Gotchas
 
 - **Run one launch at a time.** The `ros` service uses host networking, so a

@@ -81,6 +81,26 @@ ros2 launch go2_auditor sim_patrol.launch.py scenario:=changed  name:=tuesday
 Add `use_slam:=true` to exercise the real `slam_toolbox`. See
 `docs/SIM.md` for resource notes and limitations.
 
+## Robot day (real Go2)
+
+Read-only preflight writes a facts report and a one-page run sheet:
+
+```bash
+docker compose up -d api
+./tools/preflight.sh --check-upload
+```
+
+Then start the passive coordinator (it counts loops from odometry, it does
+**not** drive) and use teleop to make the loop:
+
+```bash
+ros2 launch go2_auditor patrol.launch.py \
+    route_file:=/ws/src/go2_auditor/config/patrol_route.yaml
+```
+
+Edit `config/patrol_route.yaml` to your map frame first. Full checklist and
+failures to watch for: `docs/ROBOT_DAY.md`.
+
 ## Layout
 
 | Path | Purpose |

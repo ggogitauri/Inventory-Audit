@@ -1,7 +1,7 @@
 """Kinematic 2D robot + ray-cast LiDAR for the no-Gazebo simulation.
 
 Publishes the same interfaces the real robot stack needs:
-  /scan, /odom, /tf, /tf_static, /clock, /sim/pass_complete
+  /scan, /odom, /tf, /tf_static, /clock, /auditor/pass_complete
 
 The robot follows a closed waypoint route. Each completed loop emits one
 pass event, which ground_truth_detector turns into a schema-v2 detection pass.
@@ -22,6 +22,7 @@ from std_msgs.msg import String
 from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 
 from .sim_world import DEFAULT_ROUTE, make_world, normalize_angle, scan
+from .topics import PASS_TOPIC
 
 
 def _yaw_quat(yaw: float) -> tuple[float, float, float, float]:
@@ -76,7 +77,7 @@ class SimRobot(Node):
         self.scan_pub = self.create_publisher(LaserScan, "/scan", 10)
         self.odom_pub = self.create_publisher(Odometry, "/odom", 10)
         self.clock_pub = self.create_publisher(Clock, "/clock", 10)
-        self.pass_pub = self.create_publisher(String, "/sim/pass_complete", 20)
+        self.pass_pub = self.create_publisher(String, PASS_TOPIC, 20)
         self.tf_broadcaster = TransformBroadcaster(self)
         self.static_broadcaster = StaticTransformBroadcaster(self)
 

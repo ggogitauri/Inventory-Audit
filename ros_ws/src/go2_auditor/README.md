@@ -1,6 +1,7 @@
 # go2_auditor (ROS 2 Humble)
 
 ```
+patrol_coordinator --/auditor/pass_complete (JSON)--> real detector
 mock_perception / replay_node / real detector
         --/auditor/detections (std_msgs/String, JSON)-->  patrol_uploader  --HTTP--> backend API
                                                            (queue + retry)
@@ -60,6 +61,17 @@ ros2 launch go2_auditor replay.launch.py messages:=/ws/bags/tuesday.jsonl
 ros2 launch go2_auditor replay.launch.py bag_path:=/ws/bags/tuesday
 ```
 
+On the real robot, preflight first and then count passes while you teleop:
+
+```bash
+ros2 run go2_auditor preflight --check-upload   # writes preflight.md + run_sheet.md
+ros2 launch go2_auditor patrol.launch.py \
+    route_file:=/ws/src/go2_auditor/config/patrol_route.yaml
+```
+
+The coordinator is passive: it never publishes motion commands. Edit the route
+YAML to your map frame; waypoints set the loop length and closure point.
+
 Generate JSONL fixtures without ROS:
 
 ```bash
@@ -86,6 +98,9 @@ cd src/go2_auditor
 PYTHONPATH=. python3 test/test_uploader_core.py
 PYTHONPATH=. python3 test/test_mock_world.py
 PYTHONPATH=. python3 test/test_replay.py
+PYTHONPATH=. python3 test/test_patrol_loop.py
+PYTHONPATH=. python3 test/test_preflight_core.py
+PYTHONPATH=. python3 test/test_sim_world.py
 ```
 
 ## Behaviour to know

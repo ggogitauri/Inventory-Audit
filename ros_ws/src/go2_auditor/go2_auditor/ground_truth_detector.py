@@ -18,7 +18,7 @@ from std_msgs.msg import String
 from .contract import CONTRACT_VERSION
 from .mock_world import observe
 from .sim_world import make_world
-from .topics import DETECTIONS_TOPIC, detections_qos
+from .topics import DETECTIONS_TOPIC, PASS_TOPIC, detections_qos
 
 
 class GroundTruthDetector(Node):
@@ -62,7 +62,7 @@ class GroundTruthDetector(Node):
         self.patrol_uid = f"{self.area}:{self.patrol_name}:{uuid.uuid4().hex}"
 
         self.pub = self.create_publisher(String, DETECTIONS_TOPIC, detections_qos())
-        self.create_subscription(String, "/sim/pass_complete", self._on_pass, 20)
+        self.create_subscription(String, PASS_TOPIC, self._on_pass, 20)
         self.get_logger().info(
             f"ground truth: scenario={self.scenario} objects={len(self.world.truth)} "
             f"area={self.area} patrol={self.patrol_name} map_version={self.map_version}"
@@ -93,7 +93,7 @@ class GroundTruthDetector(Node):
             "captured_at": time.time(),
             "pass_idx": idx,
             "n_passes": self.n_passes,
-            "last": idx == self.n_passes - 1,
+            "last": bool(event.get("last", idx == self.n_passes - 1)),
             "pose": event.get("pose"),
             "detections": dets,
             "patrol_meta": {"sim": True, "scenario": self.scenario,

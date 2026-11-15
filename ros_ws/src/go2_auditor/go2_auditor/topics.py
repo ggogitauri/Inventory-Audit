@@ -2,6 +2,7 @@
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
 DETECTIONS_TOPIC = "/auditor/detections"
+PASS_TOPIC = "/auditor/pass_complete"   # one loop/pass event from any coordinator
 
 
 def detections_qos() -> QoSProfile:

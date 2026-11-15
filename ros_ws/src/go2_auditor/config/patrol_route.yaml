@@ -1,0 +1,32 @@
+# Route for the passive patrol coordinator (real robot).
+#
+# These coordinates are a PLACEHOLDER. Replace them with waypoints in *your*
+# map frame before using the file for a real patrol. The coordinator never
+# drives to these points; it uses them to know the loop length and the point
+# that counts as "back at the start".
+#
+# area/patrol/n_passes can be overridden by launch arguments of the same name.
+area: lab-main
+patrol: lab-patrol
+n_passes: 2
+
+# How close (metres) the robot must return to the start to close a loop.
+loop_radius: 1.0
+
+# Metres travelled before a loop can close. 0 = 60% of the route length, which
+# tolerates a hand-driven loop that does not follow the waypoints exactly.
+min_loop_distance: 0.0
+
+# Reported localization uncertainty for the pass pose, in metres.
+pose_sigma: 0.15
+
+# Optional fixed start point. Omit it to learn the start from the first odom
+# message (better for teleop: drive to the start, then launch).
+# start: [1.0, 1.0]
+
+waypoints:
+  - [1.0, 1.0]
+  - [9.0, 1.0]
+  - [9.0, 6.0]
+  - [1.0, 6.0]
+  - [1.0, 1.0]

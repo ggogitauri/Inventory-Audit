@@ -25,6 +25,8 @@ setup(
         "console_scripts": [
             "mock_perception = go2_auditor.mock_perception:main",
             "patrol_uploader = go2_auditor.patrol_uploader:main",
+            "patrol_coordinator = go2_auditor.patrol_coordinator:main",
+            "preflight = go2_auditor.preflight:main",
             "replay_node = go2_auditor.replay_node:main",
             "sim_robot = go2_auditor.sim_robot:main",
             "ground_truth_detector = go2_auditor.ground_truth_detector:main",
