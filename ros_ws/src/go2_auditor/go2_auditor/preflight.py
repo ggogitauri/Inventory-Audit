@@ -91,8 +91,21 @@ class Preflight(Node):
 
     # -- ROS helpers -----------------------------------------------------
     def _topic_types(self) -> dict[str, str]:
-        return {name: types[0] if types else "?"
-                for name, types in self.get_topic_names_and_types()}
+        """Topics published by someone other than this preflight node.
+
+        `get_topic_names_and_types()` also lists topics this node merely
+        subscribes to, so the TF listener alone made /tf and /tf_static look
+        present on an otherwise silent robot. Counting only foreign publishers
+        keeps a dead graph looking dead.
+        """
+        me = self.get_name()
+        found: dict[str, str] = {}
+        for name, types in self.get_topic_names_and_types():
+            others = [info for info in self.get_publishers_info_by_topic(name)
+                      if info.node_name != me]
+            if others:
+                found[name] = types[0] if types else "?"
+        return found
 
     def _sample(self, topic: str, msg_type, seconds: float) -> tuple[float, list]:
         msgs: list = []
@@ -122,10 +135,13 @@ class Preflight(Node):
         topics = self._topic_types()
         self.report["topic_count"] = len(topics)
         self._check("ROS graph", "ok" if topics else "fail",
-                    f"{len(topics)} topic(s) visible on domain "
+                    f"{len(topics)} topic(s) published by other nodes on domain "
                     f"{self.report['domain']}",
-                    "" if topics else "Check ROS_DOMAIN_ID, the network cable, and that "
-                                      "the Unitree bridge is running.")
+                    "" if topics else "No other ROS node is publishing. Check "
+                                      "ROS_DOMAIN_ID, the network cable, and that the "
+                                      "Unitree bridge is running. Rehearsing on the VM? "
+                                      "Start `ros2 launch go2_auditor sim_patrol.launch.py` "
+                                      "first.")
 
         camera = sorted(t for t in topics if any(k in t.lower() for k in
                                                  ("camera", "image", "rgb", "video")))
@@ -301,7 +317,8 @@ class Preflight(Node):
         if subs == 0:
             self._check("Upload path", "fail", "no uploader subscribed to "
                         f"{DETECTIONS_TOPIC}",
-                        "Start the uploader: ros2 launch go2_auditor patrol.launch.py")
+                        "Start the uploader: `ros2 run go2_auditor patrol_uploader` "
+                        "(or the full `patrol.launch.py`).")
             return
         msg = String()
         msg.data = json.dumps(payload)
