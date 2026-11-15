@@ -190,6 +190,9 @@ def render_run_sheet(facts: dict) -> str:
         "check reported x,y (~0.3 m)",
         "",
         "## 2. Teleop loop + recording (30 min)",
+        "- [ ] If the route file still has placeholder waypoints, set "
+        "`min_loop_distance` to about half your real loop (the placeholder "
+        "assumes 26 m)",
         "- [ ] At the loop start, start the coordinator in another terminal "
         "(it never commands motion):",
         f"      `ros2 launch go2_auditor patrol.launch.py route_file:={route}`",

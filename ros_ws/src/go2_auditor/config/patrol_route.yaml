@@ -14,7 +14,9 @@ n_passes: 2
 loop_radius: 1.0
 
 # Metres travelled before a loop can close. 0 = 60% of the route length, which
-# tolerates a hand-driven loop that does not follow the waypoints exactly.
+# tolerates a hand-driven loop that does not follow the waypoints exactly. If
+# the real loop is much shorter than this placeholder route (26 m), set this to
+# about half the real loop so a pass can actually trigger.
 min_loop_distance: 0.0
 
 # Reported localization uncertainty for the pass pose, in metres.
