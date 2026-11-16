@@ -47,6 +47,87 @@ repo (`bags/`, `ros_ws/robot_discovery/`), not inside a container.
   (`/scan` or a PointCloud2), `/odom` and `/tf`. An empty graph means the bridge
   or the network is not visible yet.
 
+## Camera capture (Go2)
+
+The Go2 front camera is **not** a standard ROS image topic. `/frontvideostream`
+is `unitree_go/msg/Go2FrontVideoData` (H.264), so it cannot be recorded as
+`sensor_msgs/Image` or decoded by the stock container.
+
+**No account needed (default).** The robot runs a DDS RPC camera service
+(`videohub`); `unitree_sdk2py` calls it directly and gets a 1920x1080 JPEG per
+request. This works on the same link the ROS nodes already use:
+
+```bash
+./tools/capture_camera.py --iface enp7s0 --out bags/camera_baseline
+# throttle / bound it:
+./tools/capture_camera.py --iface enp7s0 --interval 1.0 --duration 120
+```
+
+If you omit `--iface`, the SDK auto-selects; on a laptop with both WiFi and
+Ethernet, pass the interface that reaches the robot (the tool prints the
+available names on failure). `unitree_sdk2py` must be installed
+(`pip install unitree_sdk2py`); it is already present on this host.
+
+**WebRTC fallback (`--webrtc`).** Use this off-LAN or if DDS is blocked:
+
+```bash
+./tools/setup_camera.sh                 # host-side, repo-local, no sudo
+./tools/capture_camera.py --webrtc --probe --ip <robot-ip>  # test 9991/8081
+./tools/capture_camera.py --webrtc --ip <robot-ip> --out bags/camera_baseline
+# or, when connected to the robot's own WiFi: --ap
+# off-site, through the Unitree cloud relay:
+#   --remote --serial <sn> --username <email>
+```
+
+Firmware >= 1.1.15 needs the per-device AES key **only on this fallback path**:
+
+```bash
+./tools/fetch_aes_key.sh --email <you> --device-type Go2              # list
+./tools/fetch_aes_key.sh --email <you> --device-type Go2 \
+    --sn <serial> --quiet > ~/.unitree_go2_aes_key && chmod 600 ~/.unitree_go2_aes_key
+```
+
+The tool reads `~/.unitree_go2_aes_key` automatically (or `--aes-key`,
+`UNITREE_AES_KEY`). Keep the key out of git and out of shell history.
+
+`--probe` only opens TCP sockets, so it cleanly separates "robot not reachable"
+from WebRTC/auth problems. If it reports no signaling port, the address is
+usually wrong: `192.168.123.x` is the robot's internal/DDS IP and can answer
+ping through a phone hotspot without accepting WebRTC. When using WebRTC over
+WiFi, the laptop must be on the same network as the robot's `wlan0`; read that
+address in the app under **Device → Data → STA Network**. `--ap` assumes the
+laptop has joined the Go2's own WiFi (robot at `192.168.12.1`). Close the
+Unitree app first — the robot allows one WebRTC controller.
+
+Both paths are read-only for motion: they request camera frames and never send
+sport commands. Ctrl-C leaves the partial JPEGs and `metadata.json` in place.
+Runs never share a directory: if the target exists, the tool writes to
+`<name>_2`, `<name>_3`, ... so `metadata.json` always describes one run. Copy
+`bags/camera_*` with the rosbags so the detector has real images.
+
+## Recording a loop (Go2)
+
+```bash
+# terminal 1: camera stills
+./tools/capture_camera.py --iface enp7s0 --interval 1.0 --out bags/camera_baseline
+
+# terminal 2: lean bag (odom, IMU, base_link cloud, pass events)
+./tools/record_go2.sh baseline_loops
+```
+
+`record_go2.sh` never overwrites: if `bags/baseline_loops` exists it records to
+`baseline_loops_2`. Drive the full route (about 6 m) once or twice, then Ctrl-C
+both. Check the result before calling it a baseline:
+
+```bash
+./tools/bag_summary.py bags/baseline_loops_2
+```
+
+A usable baseline shows several metres of travel and at least one
+`/auditor/pass_complete`. The tool exits non-zero for an "empty" bag (short
+travel or no pass events). Note that this Go2 publishes no `/tf`, so the bag
+has 0 TF messages by design; `map_frame:=odom` is the supported mode.
+
 ## Integration contract
 
 | Item | Value / expectation |

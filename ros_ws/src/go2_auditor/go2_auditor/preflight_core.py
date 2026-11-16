@@ -142,18 +142,31 @@ def render_run_sheet(facts: dict) -> str:
     camera = topics.get("camera") or []
     if isinstance(camera, str):
         camera = [] if camera in ("", "-") else [camera]
-    lidar_topics: list[str] = []
-    for name in [lidar] + list(topics.get("lidar") or []):
-        if name and name not in lidar_topics:
-            lidar_topics.append(name)
-    lidar_label = ", ".join(f"`{t}`" for t in lidar_topics)
+    # Record one LiDAR source, not every cloud the robot happens to publish.
+    # The Go2 graph has ~18 cloud topics; recording all of them fills a disk.
+    lidar_topics: list[str] = [lidar] if lidar else []
+    lidar_label = ", ".join(f"`{t}`" for t in lidar_topics) or "-"
     api = facts.get("api_url", "http://localhost:8000")
     route = "/ws/src/go2_auditor/config/patrol_route.yaml"
 
-    bag_topics = " ".join(lidar_topics + [odom, "/tf", "/tf_static"])
+    bag_topics = " ".join(lidar_topics + [odom, "/auditor/pass_complete",
+                                          "/tf", "/tf_static"])
     if camera:
         bag_topics += " " + " ".join(camera)
     bag_cmd = f"ros2 bag record -o /ws/bags/lab_$(date +%H%M%S) {bag_topics}"
+    map_frame = facts.get("map_frame", "map")
+    if map_frame == "odom":
+        tf_item = ("- [ ] Odom-only mode: no TF tree needed; pass poses stay "
+                   "in `odom`")
+    else:
+        tf_item = (f"- [ ] `ros2 run tf2_ros tf2_echo {map_frame} "
+                   f"{facts.get('base_frame', 'base_link')}` resolves")
+    if camera:
+        camera_item = ("- [ ] Note which camera topic is colour and whether "
+                       "`camera_info` exists")
+    else:
+        camera_item = ("- [ ] No ROS image topic: capture stills from the "
+                       "Unitree app/WebRTC and record the source")
 
     lines = [f"# Lab run sheet — {facts.get('generated_at', '')}", ""]
     if bad:
@@ -174,8 +187,7 @@ def render_run_sheet(facts: dict) -> str:
         "## 0. Before any motion (10 min)",
         "- [ ] E-stop in hand, area clear, motion limits agreed",
         "- [ ] `ros2 topic list` shows the expected robot topics",
-        f"- [ ] `ros2 run tf2_ros tf2_echo {facts.get('map_frame', 'map')} "
-        f"{facts.get('base_frame', 'base_link')}` resolves",
+        tf_item,
         "- [ ] If there is no map frame: run SLAM, or use `--map-frame odom` and "
         "keep baseline + changed in one session",
         "- [ ] Robot and laptop clocks agree within 1 s (`date -u`)",
@@ -185,14 +197,13 @@ def render_run_sheet(facts: dict) -> str:
         "- [ ] No motion. Record 60 s of sensors for replay (use the step 2 command)",
         "- [ ] With a tape measure in view, capture images at 1, 2 and 3 m from a "
         "known object",
-        "- [ ] Note which camera topic is colour and whether `camera_info` exists",
+        camera_item,
         "- [ ] If the detector is already running: put a box at a taped distance and "
         "check reported x,y (~0.3 m)",
         "",
         "## 2. Teleop loop + recording (30 min)",
-        "- [ ] If the route file still has placeholder waypoints, set "
-        "`min_loop_distance` to about half your real loop (the placeholder "
-        "assumes 26 m)",
+        "- [ ] Set `min_loop_distance` to about half your measured loop; "
+        "the waypoints are placeholders and do not drive the robot",
         "- [ ] At the loop start, start the coordinator in another terminal "
         "(it never commands motion):",
         f"      `ros2 launch go2_auditor patrol.launch.py route_file:={route}`",

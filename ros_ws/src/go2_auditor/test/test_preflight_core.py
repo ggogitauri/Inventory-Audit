@@ -105,11 +105,21 @@ class RenderTest(unittest.TestCase):
         self.assertIn("ros2 bag record", text)
         self.assertIn("/utlidar/cloud /odom", text)
 
-    def test_run_sheet_records_scan_and_cloud_together(self):
+    def test_run_sheet_records_one_lidar_source(self):
         facts = self.facts([Check("TF chain", "ok")])
-        facts["topics"]["lidar"] = ["/utlidar/cloud", "/scan"]
+        facts["topics"]["lidar_source"] = "/utlidar/cloud_base"
+        facts["topics"]["lidar"] = ["/utlidar/cloud", "/utlidar/cloud_base"]
         text = render_run_sheet(facts)
-        self.assertIn("/scan /utlidar/cloud /odom", text)
+        self.assertIn("/utlidar/cloud_base /odom", text)
+        self.assertIn("/auditor/pass_complete", text)
+        self.assertNotIn("/utlidar/cloud /utlidar/cloud_base", text)
+
+    def test_run_sheet_skips_tf_echo_in_odom_only_mode(self):
+        facts = self.facts([Check("TF chain", "skip")])
+        facts["map_frame"] = "odom"
+        text = render_run_sheet(facts)
+        self.assertIn("Odom-only mode", text)
+        self.assertNotIn("tf2_echo odom", text)
 
     def test_run_sheet_without_camera_says_so(self):
         facts = self.facts([Check("TF chain", "ok")])

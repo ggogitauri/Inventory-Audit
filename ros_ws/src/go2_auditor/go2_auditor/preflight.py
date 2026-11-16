@@ -28,7 +28,7 @@ from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import LaserScan, PointCloud2
 from std_msgs.msg import String
 from tf2_ros import Buffer, TransformListener
 
@@ -143,18 +143,40 @@ class Preflight(Node):
                                       "Start `ros2 launch go2_auditor sim_patrol.launch.py` "
                                       "first.")
 
-        camera = sorted(t for t in topics if any(k in t.lower() for k in
-                                                 ("camera", "image", "rgb", "video")))
+        camera_like = sorted(t for t in topics if any(k in t.lower() for k in
+                                                      ("camera", "image", "rgb", "video")))
+        # Only standard ROS image topics can be recorded and decoded by the
+        # detector. The Go2's front camera is normally a unitree_go
+        # Go2FrontVideoData (H.264) or a WebRTC stream, which needs a decoder.
+        camera = sorted(t for t in camera_like
+                        if "Image" in topics.get(t, ""))
         lidar = sorted(t for t in topics if any(k in t.lower() for k in
                                                 ("lidar", "points", "cloud", "scan")))
         self.facts["lidar/scan topics"] = ", ".join(lidar) or "-"
-        self.facts["camera topics"] = ", ".join(camera) or "-"
+        self.facts["camera topics"] = ", ".join(
+            f"{t} ({topics.get(t, '?')})" for t in camera_like) or "-"
         self.report["topics"] = {"scan": self.opts.scan_topic,
                                  "odom": self.opts.odom_topic,
-                                 "camera": camera, "lidar": lidar}
-        self._check("TF topics", "ok" if "/tf" in topics else "fail",
-                    ", ".join(t for t in ("/tf", "/tf_static") if t in topics) or "none",
-                    "No /tf: the robot's TF publisher is not running.")
+                                 "camera": camera, "camera_like": camera_like,
+                                 "lidar": lidar}
+        if not camera:
+            detail = ("no sensor_msgs/Image or CompressedImage topic"
+                      if camera_like else "no camera topic found")
+            self._check("Camera images", "warn", detail,
+                        "The Go2 front camera is usually H.264 over "
+                        "unitree_go/Go2FrontVideoData or WebRTC, not a ROS "
+                        "Image. Capture stills with the Unitree app or "
+                        "unitree_webrtc_connect and note the source.")
+        if "/tf" in topics:
+            self._check("TF topics", "ok",
+                        ", ".join(t for t in ("/tf", "/tf_static") if t in topics))
+        elif self.opts.map_frame == "odom":
+            self._check("TF topics", "skip", "none (odom-only mode)",
+                        "No TF tree is expected for odom-only pass counting; "
+                        "poses come from odometry.")
+        else:
+            self._check("TF topics", "fail", "none",
+                        "No /tf: the robot's TF publisher is not running.")
 
     def check_scan(self) -> None:
         topic = self.opts.scan_topic
@@ -176,6 +198,30 @@ class Preflight(Node):
                         "If the LiDAR publishes PointCloud2, run "
                         "pointcloud_to_laserscan to create /scan, or pass "
                         "--scan-topic with the real scan topic.")
+            return
+        if topics.get(topic) == "sensor_msgs/msg/PointCloud2":
+            # The Go2's 4D LiDAR is cloud-only. Day-one loop counting needs
+            # odometry, so this is a warning rather than a failure.
+            rate, msgs = self._sample(topic, PointCloud2, self.opts.sample_seconds)
+            if not msgs:
+                self._check("Laser scan", "warn",
+                            f"{topic} is PointCloud2 but published no messages in "
+                            f"{self.opts.sample_seconds:.0f} s",
+                            "Check the LiDAR driver before recording the cloud. "
+                            "Loop counting only needs odometry.")
+                return
+            msg = msgs[-1]
+            points = int(msg.width) * int(msg.height)
+            self.scan_frame = msg.header.frame_id
+            self.report["topics"]["lidar_source"] = topic
+            self.facts["scan topic"] = f"{topic} (PointCloud2, {points} points)"
+            self.facts["scan frame"] = msg.header.frame_id or "(empty)"
+            self._check("Laser scan", "warn",
+                        f"{topic} is PointCloud2 ({points} points, {rate:.1f} Hz), "
+                        "not LaserScan",
+                        "Loop counting needs only odometry. Run "
+                        "pointcloud_to_laserscan for SLAM/Nav2, and record this "
+                        "cloud for offline use.")
             return
         self.facts["scan topic"] = f"{topic} ({topics[topic]})"
         self.report["topics"]["lidar_source"] = topic
@@ -223,6 +269,8 @@ class Preflight(Node):
             self._check("Odometry", "fail", f"no messages on {topic}")
             return
         msg = msgs[-1]
+        self.odom_frame = msg.header.frame_id
+        self.odom_child = msg.child_frame_id
         self.report["odom"] = {
             "frame_id": msg.header.frame_id,
             "child_frame_id": msg.child_frame_id,
@@ -234,8 +282,39 @@ class Preflight(Node):
         self._check("Odometry rate", "ok" if rate >= 1 else "warn",
                     f"{rate:.1f} Hz on {topic}")
 
+    def _check_sensor_tf(self, base: str) -> None:
+        scan_frame = getattr(self, "scan_frame", "")
+        if not scan_frame:
+            return
+        if scan_frame == base:
+            self._check("Sensor TF", "ok", f"scan is already in {base}")
+            return
+        stf, verr = self._wait_tf(base, scan_frame)
+        if stf is not None:
+            t = stf.transform.translation
+            self.facts[f"{base} -> scan"] = f"({t.x:.2f}, {t.y:.2f}, {t.z:.2f}) m"
+            self._check("Sensor TF", "ok",
+                        f"{base} -> {scan_frame} ({t.x:.2f}, {t.y:.2f}, {t.z:.2f}) m")
+        else:
+            self._check("Sensor TF", "warn", f"{base} -> {scan_frame} failed",
+                        f"Detections cannot be placed without this transform: {verr}")
+
     def check_tf(self) -> None:
         map_frame, base = self.opts.map_frame, self.opts.base_frame
+        odom_frame = getattr(self, "odom_frame", "")
+        odom_child = getattr(self, "odom_child", "")
+        if map_frame == odom_frame and base == odom_child:
+            # The Unitree bridge publishes odometry but no TF. In odom-only
+            # mode the odometry message itself is the pose chain, so a TF tree
+            # is not required for day-one pass counting.
+            self._check("TF chain", "skip",
+                        f"odom-only mode: {odom_frame} -> {base} comes from "
+                        f"{self.opts.odom_topic}; no TF needed",
+                        "Pass poses stay in odom. Keep baseline and changed runs "
+                        "in one session and write down the drift.")
+            self._check_sensor_tf(base)
+            return
+
         tf, err = self._wait_tf(map_frame, base)
         if tf is not None:
             t = tf.transform.translation
@@ -243,10 +322,10 @@ class Preflight(Node):
             self._check("TF chain", "ok", f"{map_frame} -> {base} "
                         f"({t.x:.2f}, {t.y:.2f})")
         else:
-            odom_tf, _ = self._wait_tf("odom", base)
+            odom_tf, _ = self._wait_tf(odom_frame or "odom", base)
             if odom_tf is not None:
                 self._check("Map frame", "warn", f"{map_frame} -> {base} unavailable; "
-                            f"odom -> {base} works",
+                            f"{odom_frame or 'odom'} -> {base} works",
                             "Start SLAM, or publish an identity map->odom so detections "
                             "share a stable frame across patrols. Short session? Run "
                             "with --map-frame odom and keep baseline + changed together, "
@@ -257,17 +336,7 @@ class Preflight(Node):
                             f"it may be base_footprint.")
                 return
 
-        scan_frame = getattr(self, "scan_frame", "")
-        if scan_frame:
-            stf, verr = self._wait_tf(base, scan_frame)
-            if stf is not None:
-                t = stf.transform.translation
-                self.facts[f"{base} -> scan"] = f"({t.x:.2f}, {t.y:.2f}, {t.z:.2f}) m"
-                self._check("Sensor TF", "ok",
-                            f"{base} -> {scan_frame} ({t.x:.2f}, {t.y:.2f}, {t.z:.2f}) m")
-            else:
-                self._check("Sensor TF", "warn", f"{base} -> {scan_frame} failed",
-                            f"Detections cannot be placed without this transform: {verr}")
+        self._check_sensor_tf(base)
 
     def check_clock(self) -> None:
         topics = self._topic_types()
